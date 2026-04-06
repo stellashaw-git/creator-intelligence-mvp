@@ -122,7 +122,8 @@ with st.container():
         submitted = st.form_submit_button("Analyze", type="primary")
 
     if submitted:
-    target: str | None = None
+        target = None
+
     if username_input.strip():
         target = resolve_username(username_input)
         if target is None:
@@ -131,8 +132,10 @@ with st.container():
                 "Use a username from the demo list or pick from the dropdown."
             )
             st.session_state.analyzed_user = None
+
     elif demo_pick:
         target = demo_pick
+
     else:
         st.warning("Enter a TikTok username or choose a demo creator.")
         st.session_state.analyzed_user = None
@@ -147,23 +150,25 @@ with st.container():
             step2 = st.empty()
             step3 = st.empty()
 
-            step1.markdown("⏳ Running agent...")
+            step1.markdown("⏳ Running decision agent...")
             time.sleep(0.6)
 
-            step1.markdown("✅ Running agent...")
-            step2.markdown("⏳ Analyzing engagement...")
+            step1.markdown("✅ Running decision agent...")
+            step2.markdown("⏳ Scoring engagement quality...")
             time.sleep(0.8)
 
-            step2.markdown("✅ Analyzing engagement...")
+            step2.markdown("✅ Scoring engagement quality...")
             step3.markdown("⏳ Detecting monetization gap...")
             time.sleep(0.8)
 
             step3.markdown("✅ Detecting monetization gap...")
-            progress_box.info("⏳ Generating decision...")
+            progress_box.info("⏳ Generating monetization verdict...")
             time.sleep(0.9)
 
         progress_box.success("✅ Decision ready")
+
         st.session_state.analyzed_user = target
+
         time.sleep(0.4)
         thinking_box.empty()
         progress_box.empty()
