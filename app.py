@@ -6,6 +6,7 @@ Run: streamlit run app.py
 from __future__ import annotations
 import pandas as pd
 import streamlit as st
+import time
 from llm_analysis import generate_openai_analysis
 from scoring import add_creator_scores, decision_summary, rank_explanation_bullets
 
@@ -13,7 +14,7 @@ st.set_page_config(page_title="Creator Decision Agent", layout="wide")
 
 st.title("Creator Decision Agent")
 
-st.markdown("> This is not a dashboard. This is an AI decision agent.")
+st.markdown("> This is an AI decision agent.")
 
 st.markdown("""
 ### AI-powered monetization intelligence for the creator economy
@@ -121,23 +122,51 @@ with st.container():
         submitted = st.form_submit_button("Analyze", type="primary")
 
     if submitted:
-        target: str | None = None
-        if username_input.strip():
-            target = resolve_username(username_input)
-            if target is None:
-                st.error(
-                    f"No demo profile matches “{username_input.strip()}”. "
-                    "Use a username from the demo list or pick from the dropdown."
-                )
-                st.session_state.analyzed_user = None
-        elif demo_pick:
-            target = demo_pick
-        else:
-            st.warning("Enter a TikTok username or choose a demo creator.")
+    target: str | None = None
+    if username_input.strip():
+        target = resolve_username(username_input)
+        if target is None:
+            st.error(
+                f"No demo profile matches “{username_input.strip()}”. "
+                "Use a username from the demo list or pick from the dropdown."
+            )
             st.session_state.analyzed_user = None
+    elif demo_pick:
+        target = demo_pick
+    else:
+        st.warning("Enter a TikTok username or choose a demo creator.")
+        st.session_state.analyzed_user = None
 
-        if target is not None:
-            st.session_state.analyzed_user = target
+    if target is not None:
+        thinking_box = st.empty()
+        progress_box = st.empty()
+
+        with thinking_box.container():
+            st.markdown("##### AI Agent Process")
+            step1 = st.empty()
+            step2 = st.empty()
+            step3 = st.empty()
+
+            step1.markdown("⏳ Running agent...")
+            time.sleep(0.6)
+
+            step1.markdown("✅ Running agent...")
+            step2.markdown("⏳ Analyzing engagement...")
+            time.sleep(0.8)
+
+            step2.markdown("✅ Analyzing engagement...")
+            step3.markdown("⏳ Detecting monetization gap...")
+            time.sleep(0.8)
+
+            step3.markdown("✅ Detecting monetization gap...")
+            progress_box.info("⏳ Generating decision...")
+            time.sleep(0.9)
+
+        progress_box.success("✅ Decision ready")
+        st.session_state.analyzed_user = target
+        time.sleep(0.4)
+        thinking_box.empty()
+        progress_box.empty()
 
 # ========== Results ==========
 analyzed = st.session_state.analyzed_user
