@@ -9,7 +9,28 @@ import streamlit as st
 from llm_analysis import generate_openai_analysis
 from scoring import add_creator_scores, decision_summary, rank_explanation_bullets
 
-st.set_page_config(page_title="Creator Monetization Intelligence", layout="wide")
+st.set_page_config(page_title="Creator Decision Agent", layout="wide")
+
+st.title("Creator Decision Agent")
+
+st.markdown("> This is not a dashboard. This is an AI decision agent.")
+
+st.markdown("""
+### AI-powered monetization intelligence for the creator economy
+
+We build an AI decision agent that evaluates creator commercial value and predicts monetization potential.
+
+---
+
+**What this agent does:**
+- Predicts creator revenue potential
+- Scores commercial value
+- Identifies monetization opportunities
+- Explains why a creator is valuable
+
+---
+""")
+
 
 # --- Load & score data ---
 data_path = "data.csv"
@@ -130,7 +151,19 @@ else:
 
     st.divider()
     st.markdown("### Results")
+    st.markdown("""
+    ---
 
+    ### Why this matters
+
+    Most creator tools provide analytics.
+
+    This agent goes further — it **makes economic decisions**.
+
+    It helps brands, investors, and creators answer:
+
+    > *"How valuable is this creator, and how can they monetize better?"*
+    """)
     # --- Decision summary ---
     ds = decision_summary(row, df)
 
@@ -266,3 +299,15 @@ with st.expander("Demo dataset (raw)", expanded=False):
         use_container_width=True,
         hide_index=True,
     )
+    st.markdown("""
+    ---
+
+    ### Future Vision
+
+    From creator monetization → to marketing decision infrastructure
+
+    We aim to become the AI layer for:
+    - Creator economy
+    - Brand partnerships
+    - Marketing budget allocation
+    """)
