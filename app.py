@@ -121,8 +121,8 @@ with st.container():
         )
         submitted = st.form_submit_button("Analyze", type="primary")
 
-    if submitted:
-        target = None
+if submitted:
+    target = None
 
     if username_input.strip():
         target = resolve_username(username_input)
