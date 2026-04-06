@@ -1,27 +1,17 @@
 """
-Streamlit entrypoint: load creators from data.csv, score, rank, and explore.
-
+Streamlit entrypoint: product-style demo for creator monetization intelligence.
 Run: streamlit run app.py
 """
 
 from __future__ import annotations
-
 import pandas as pd
 import streamlit as st
-
 from llm_analysis import generate_openai_analysis
-from scoring import add_creator_scores, rank_explanation_bullets
+from scoring import add_creator_scores, decision_summary, rank_explanation_bullets
 
-# Page config (title in browser tab + layout).
-st.set_page_config(page_title="AI Creator Intelligence MVP", layout="wide")
+st.set_page_config(page_title="Creator Monetization Intelligence", layout="wide")
 
-st.title("AI Creator Intelligence MVP")
-st.markdown(
-    "Identify high-potential TikTok creators and generate decision-ready operating insights "
-    "for MCN and agency teams."
-)
-
-# --- Load data ---
+# --- Load & score data ---
 data_path = "data.csv"
 try:
     df_raw = pd.read_csv(data_path)
@@ -29,92 +19,250 @@ except FileNotFoundError:
     st.error(f"Missing `{data_path}`. Place your CSV next to `app.py`.")
     st.stop()
 
-# Basic validation so errors are obvious in the UI.
 required = {"username", "followers", "avg_views", "avg_likes", "avg_comments", "growth_30d"}
 missing = required - set(df_raw.columns)
 if missing:
     st.error(f"CSV is missing columns: {sorted(missing)}")
     st.stop()
 
-# --- Score and rank ---
 df = add_creator_scores(df_raw)
+demo_usernames = df["username"].tolist()
 
-# --- Ranked table ---
-st.subheader("Ranked creators")
-st.dataframe(
-    df[
-        [
-            "rank",
-            "username",
-            "niche",
-            "final_score",
-            "followers",
-            "avg_views",
-            "engagement_rate",
-            "growth_30d",
-        ]
-    ],
-    use_container_width=True,
-    hide_index=True,
-)
 
-st.divider()
+def resolve_username(name: str) -> str | None:
+    """Match username from CSV (case-insensitive, strip @)."""
+    q = name.strip().lstrip("@").lower()
+    if not q:
+        return None
+    for u in df["username"]:
+        if str(u).lower() == q:
+            return str(u)
+    return None
 
-# --- Creator selection (order matches rank) ---
-usernames = df["username"].tolist()
-selected = st.selectbox(
-    "Select a creator",
-    options=usernames,
-    index=0,
-    help="Choices follow rank order (best score first).",
-)
-row = df[df["username"] == selected].iloc[0]
 
-# --- Profile ---
-st.subheader("Creator profile")
-st.markdown(f"### {row['username']}")
-st.caption(f"Niche: **{row.get('niche', '—')}**")
+# ========== Noise detection ==========
+def detect_paid_noise(row, df_cohort) -> str:
+    """
+    判定 Creator 是否存在投流/噪音行为
+    """
+    avg_views = row.get("avg_views", 0)
+    engagement_rate = row.get("engagement_rate", 0)
+    growth_30d = row.get("growth_30d", 0)
+    avg_likes = row.get("avg_likes", 0)
+    avg_comments = row.get("avg_comments", 0)
 
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Followers", f"{row['followers']:,.0f}")
-m2.metric("Avg views", f"{row['avg_views']:,.0f}")
-m3.metric("Avg likes", f"{row['avg_likes']:,.0f}")
-m4.metric("Avg comments", f"{row['avg_comments']:,.0f}")
+    # --- 相对指标 ---
+    view_pct = df_cohort["avg_views"].rank(pct=True).get(row.name, 0.5)
+    engagement_pct = df_cohort["engagement_rate"].rank(pct=True).get(row.name, 0.5)
+    growth_pct = df_cohort["growth_30d"].rank(pct=True).get(row.name, 0.5)
 
-m5, _, _, _ = st.columns(4)
-m5.metric("Growth (30d)", f"{row['growth_30d']:,.0f}")
+    signals = 0
+    if avg_views > 50000 and engagement_rate < 0.01:
+        signals += 1
+    if view_pct > 0.9 and engagement_pct < 0.2:
+        signals += 1
+    if growth_pct > 0.9 and engagement_pct < 0.3:
+        signals += 1
+    if avg_views > 10000 and (avg_likes / max(avg_views, 1) < 0.005 or avg_comments / max(avg_views, 1) < 0.001):
+        signals += 1
 
-st.markdown("##### Scores (0–100)")
-st.caption(
-    "Reach = avg of normalized followers & avg views. Engagement = normalized engagement rate. "
-    "Growth = normalized 30d growth. Final = average of the three."
-)
-s1, s2, s3, s4 = st.columns(4)
-s1.metric("Reach score", f"{row['reach_score']:.2f}")
-s2.metric("Engagement score", f"{row['engagement_score']:.2f}")
-s3.metric("Growth score", f"{row['growth_score']:.2f}")
-s4.metric("Final score", f"{row['final_score']:.2f}")
+    if signals >= 3:
+        return "Likely Paid Noise"
+    elif signals >= 1:
+        return "Possible Noise"
+    else:
+        return "Normal"
 
-# How this rank lines up with raw signals (rank itself comes from final_score).
-rank_why = rank_explanation_bullets(row, df)
-st.markdown(f"#### Why this creator ranks #{int(row['rank'])}")
-for line in rank_why:
-    st.markdown(f"- {line}")
-if not rank_why:
-    st.caption(
-        "No bullet matched (growth not #1 in file, engagement at/below median, or reach efficiency below median). "
-        "Rank still reflects the blended score above."
+
+# --- Session ---
+if "analyzed_user" not in st.session_state:
+    st.session_state.analyzed_user = None
+
+# ========== Hero ==========
+st.markdown("## Creator Monetization Intelligence")
+st.markdown("*Identify which creators can actually monetize, not just generate traffic*")
+st.markdown("")
+
+# ========== Input ==========
+with st.container():
+    st.markdown("##### Run analysis")
+    with st.form("analyze_form", clear_on_submit=False):
+        username_input = st.text_input(
+            "Enter TikTok username",
+            placeholder="@creator or creator handle",
+            help="Matches a row in the demo CSV (case-insensitive).",
+        )
+        demo_pick = st.selectbox(
+            "Or select demo creator",
+            options=[""] + demo_usernames,
+            format_func=lambda x: "— Pick a demo profile —" if x == "" else x,
+        )
+        submitted = st.form_submit_button("Analyze", type="primary")
+
+    if submitted:
+        target: str | None = None
+        if username_input.strip():
+            target = resolve_username(username_input)
+            if target is None:
+                st.error(
+                    f"No demo profile matches “{username_input.strip()}”. "
+                    "Use a username from the demo list or pick from the dropdown."
+                )
+                st.session_state.analyzed_user = None
+        elif demo_pick:
+            target = demo_pick
+        else:
+            st.warning("Enter a TikTok username or choose a demo creator.")
+            st.session_state.analyzed_user = None
+
+        if target is not None:
+            st.session_state.analyzed_user = target
+
+# ========== Results ==========
+analyzed = st.session_state.analyzed_user
+if not analyzed:
+    st.info("Enter a handle or pick a demo creator, then click **Analyze** to see the monetization view.")
+elif analyzed not in set(df["username"].astype(str)):
+    st.session_state.analyzed_user = None
+    st.warning("Saved profile is no longer in the dataset; run analysis again.")
+else:
+    row = df[df["username"].astype(str) == analyzed].iloc[0]
+
+    st.divider()
+    st.markdown("### Results")
+
+    # --- Decision summary ---
+    ds = decision_summary(row, df)
+
+    # --- Add noise detection ---
+    ds["noise_flag"] = detect_paid_noise(row, df)
+
+    # Adjust monetization verdict based on noise
+    if ds["noise_flag"] == "Likely Paid Noise":
+        ds["monetization_verdict"] = "Low (Noise detected)"
+        ds["traffic_monetization_gap"] = "High traffic, low genuine engagement"
+        ds["recommended_action"] = "Pass / Monitor only"
+    elif ds["noise_flag"] == "Possible Noise":
+        ds["monetization_verdict"] += " (Possible Noise)"
+        ds["recommended_action"] = "Pilot test with caution"
+
+    st.markdown("##### Decision Summary")
+    d1, d2, d3 = st.columns(3)
+    _card_style = (
+        "background:#f8fafc;padding:1rem 1.1rem;border-radius:10px;"
+        "border:1px solid #e2e8f0;border-left:5px solid {accent};"
+        "min-height:5.5rem;box-shadow:0 1px 3px rgba(0,0,0,0.06);"
     )
 
-st.divider()
+    # --- Cards ---
+    with d1:
+        st.markdown(
+            f"""
+            <div style="{_card_style.format(accent='#0d9488')}">
+                <div style="font-size:0.72rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">
+                    Monetization Verdict
+                </div>
+                <div style="font-size:1.05rem;font-weight:700;color:#0f172a;margin-top:0.45rem;line-height:1.3;">
+                    {ds['monetization_verdict']}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-# --- AI analysis: OpenAI when API key is set; otherwise rule-based memo ---
-st.subheader("AI Analysis")
+    with d2:
+        st.markdown(
+            f"""
+            <div style="{_card_style.format(accent='#2563eb')}">
+                <div style="font-size:0.72rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">
+                    Traffic vs Monetization Gap
+                </div>
+                <div style="font-size:1.05rem;font-weight:700;color:#0f172a;margin-top:0.45rem;line-height:1.3;">
+                    {ds['traffic_monetization_gap']}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-analysis_md, analysis_mode = generate_openai_analysis(row, df)
-if analysis_mode == "openai":
-    st.caption("Mode: OpenAI")
-else:
-    st.caption("Mode: Rule-based fallback")
+    with d3:
+        st.markdown(
+            f"""
+            <div style="{_card_style.format(accent='#7c3aed')}">
+                <div style="font-size:0.72rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">
+                    Recommended Action
+                </div>
+                <div style="font-size:1.05rem;font-weight:700;color:#0f172a;margin-top:0.45rem;line-height:1.3;">
+                    {ds['recommended_action']}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-st.markdown(analysis_md)
+    st.markdown("")
+
+    # --- Profile header ---
+    col_a, col_b = st.columns([2, 1])
+    with col_a:
+        st.markdown(f"#### @{row['username']}")
+        st.caption(f"Niche · **{row.get('niche', '—')}**  ·  Rank **#{int(row['rank'])}** in demo cohort")
+    with col_b:
+        st.metric("Final score", f"{row['final_score']:.2f}", help="Blend of reach, engagement, and growth (0–100).")
+
+    # --- Performance snapshot ---
+    st.markdown("##### Performance snapshot")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Followers", f"{row['followers']:,.0f}")
+    c2.metric("Avg views", f"{row['avg_views']:,.0f}")
+    c3.metric("Avg likes", f"{row['avg_likes']:,.0f}")
+    c4.metric("Avg comments", f"{row['avg_comments']:,.0f}")
+    c5, c6 = st.columns(2)
+    c5.metric("Growth (30d)", f"{row['growth_30d']:,.0f}")
+    c6.metric("Engagement rate", f"{row['engagement_rate']:.4f}")
+
+    # --- Monetization scores ---
+    st.markdown("##### Monetization scores (0–100)")
+    st.caption("Reach · Engagement · Growth — normalized within this demo file; final score is their average.")
+    sb1, sb2, sb3 = st.columns(3)
+    sb1.metric("Reach", f"{row['reach_score']:.2f}")
+    sb2.metric("Engagement", f"{row['engagement_score']:.2f}")
+    sb3.metric("Growth", f"{row['growth_score']:.2f}")
+
+    # --- Rank explanation ---
+    rank_why = rank_explanation_bullets(row, df)
+    with st.expander("Why this rank?", expanded=True):
+        if rank_why:
+            for line in rank_why:
+                st.markdown(f"- {line}")
+        else:
+            st.caption("No standout rank bullets for this profile vs. the cohort; final score still reflects the blended model.")
+
+    # --- AI Analysis ---
+    st.markdown("##### Intelligence memo")
+    analysis_md, analysis_mode = generate_openai_analysis(row, df)
+    if analysis_mode == "openai":
+        st.caption("Mode: OpenAI")
+    else:
+        st.caption("Mode: Rule-based fallback")
+    st.markdown(analysis_md)
+
+# ========== Dataset hidden by default ==========
+with st.expander("Demo dataset (raw)", expanded=False):
+    st.caption("For debugging or transparency — not part of the default demo flow.")
+    st.dataframe(
+        df[
+            [
+                "rank",
+                "username",
+                "niche",
+                "final_score",
+                "followers",
+                "avg_views",
+                "engagement_rate",
+                "growth_30d",
+            ]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )

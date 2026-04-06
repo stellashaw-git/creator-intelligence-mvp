@@ -91,3 +91,61 @@ def rank_explanation_bullets(row: pd.Series, df: pd.DataFrame) -> list[str]:
         bullets.append("Strong reach efficiency")
 
     return bullets
+
+
+def decision_summary(row: pd.Series, df: pd.DataFrame) -> dict[str, str]:
+    """
+    Three-line decision outputs for the demo UI (uses engagement_rate, views/followers, growth_score).
+
+    Returns keys: monetization_verdict, traffic_monetization_gap, recommended_action.
+    """
+    eng = float(row["engagement_rate"])
+    ratio = float(row["avg_views"]) / max(float(row["followers"]), 1.0)
+    gs = float(row["growth_score"])
+
+    med_eng = float(df["engagement_rate"].median())
+    q75_eng = float(df["engagement_rate"].quantile(0.75))
+    cohort_ratio = df["avg_views"] / df["followers"].clip(lower=1.0)
+    med_ratio = float(cohort_ratio.median())
+
+    high_traffic = ratio >= med_ratio
+    weak_engagement = eng < med_eng
+    strong_engagement = eng > 0.1 or eng >= q75_eng
+
+    # 1. Monetization verdict
+    if high_traffic and weak_engagement:
+        monetization_verdict = "Low (High traffic but weak monetization)"
+    elif strong_engagement:
+        monetization_verdict = "High Monetization Potential"
+    else:
+        monetization_verdict = "Medium"
+
+    # 2. Traffic vs monetization gap
+    if strong_engagement:
+        traffic_gap = "Strong monetization (engagement supports conversion)"
+    elif high_traffic and weak_engagement:
+        traffic_gap = "High traffic but weak engagement (likely poor conversion)"
+    else:
+        traffic_gap = "Balanced"
+
+    # 3. Recommended action (growth_score + verdict)
+    if monetization_verdict.startswith("Low"):
+        recommended_action = "Pass"
+    elif monetization_verdict == "High Monetization Potential" and gs > 70:
+        recommended_action = "Sign (proceed)"
+    elif monetization_verdict == "High Monetization Potential" and gs > 40:
+        recommended_action = "Pilot test"
+    elif monetization_verdict == "High Monetization Potential":
+        recommended_action = "Monitor"
+    elif monetization_verdict == "Medium" and gs > 55:
+        recommended_action = "Pilot test"
+    elif monetization_verdict == "Medium":
+        recommended_action = "Monitor"
+    else:
+        recommended_action = "Pass"
+
+    return {
+        "monetization_verdict": monetization_verdict,
+        "traffic_monetization_gap": traffic_gap,
+        "recommended_action": recommended_action,
+    }
